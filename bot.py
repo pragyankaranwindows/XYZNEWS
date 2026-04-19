@@ -99,7 +99,7 @@ async def sweep_youtube(history):
 async def sweep_instagram(history):
     """Executes Proxy-Routed Instagram Sweep."""
     if not RAPIDAPI_KEY:
-        print("Skipping IG Sweep: RAPIDAPI_KEY environment variable not set.")
+        print("Skipping IG Sweep: RAPIDAPI_KEY not set.")
         return
 
     url = "https://instagram-scraper-stable-api.p.rapidapi.com/get_ig_user_reels.php"
@@ -113,21 +113,23 @@ async def sweep_instagram(history):
         try:
             payload = {
                 "username_or_url": ig_user,
-                "amount": "3",  # We only need the latest 3 to check for new targets
+                "amount": "3",  
                 "pagination_token": ""
             }
             
             response = requests.post(url, data=payload, headers=headers)
             
             if response.status_code != 200:
-                print(f"Proxy Error [{response.status_code}] for {ig_user}. Check API quotas.")
+                print(f"Proxy Error [{response.status_code}] for {ig_user}.")
                 continue
                 
             data = response.json()
             
-            # Dynamic parsing to locate the payload array
-            items = data.get('data', [])
-            if not items and 'items' in data:
+            # --- THE FIX: Updated dynamic parser based on your log intel ---
+            items = data.get('reels', []) # Prioritize 'reels' array
+            if not items and 'data' in data:
+                items = data['data']
+            elif not items and 'items' in data:
                 items = data['items']
             elif not items and isinstance(data, list):
                 items = data
@@ -141,7 +143,6 @@ async def sweep_instagram(history):
                 if count >= 3:
                     break
                 
-                # Dig for the shortcode/code depending on API structure
                 node = item.get('node', item)
                 shortcode = node.get('shortcode') or node.get('code')
                 
