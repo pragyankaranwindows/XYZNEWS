@@ -36,18 +36,28 @@ def save_history(video_id):
         f.write(f"{video_id}\n")
 
 def download_video(video_url):
-    """Used strictly for YouTube targets."""
+    """Used strictly for YouTube. Spoofs mobile to bypass Bot Checks. Pre-merged to avoid FFmpeg."""
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'best[ext=mp4]/best',  # KILLS FFMPEG DEPENDENCY
         'outtmpl': '%(id)s.%(ext)s',
         'quiet': True,
-        'no_warnings': True
+        'no_warnings': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios']  # KILLS YOUTUBE BOT BLOCK
+            }
+        }
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(video_url, download=False)
-            if 'youtube' in video_url and info.get('duration', 0) > 65:
+            
+            # Skip live streams (which caused your '2 days' error) and long videos
+            if info.get('is_live') or info.get('duration', 0) > 65:
+                print(f"Skipping: {info.get('title')} (Live or Too Long)")
                 return None, None
+                
+            print(f"Downloading YT payload: {info.get('title')}")
             ydl.download([video_url])
             return f"{info['id']}.mp4", info.get('title', 'Video Payload')
         except Exception as e:
@@ -57,6 +67,7 @@ def download_video(video_url):
 def download_direct(url, filename):
     """Bypasses yt-dlp to download directly from Meta's CDN."""
     try:
+        print("Downloading direct from Meta CDN...")
         r = requests.get(url, stream=True)
         if r.status_code == 200:
             with open(filename, 'wb') as f:
@@ -89,6 +100,8 @@ async def sweep_youtube(history):
                         parse_mode='md'
                     )
                     os.remove(filepath)
+                    print(f"YT Payload delivered: {video_id}")
+                
                 save_history(video_id)
                 history.add(video_id)
         except Exception as e:
@@ -129,15 +142,15 @@ async def sweep_instagram(history):
                 if video_id not in history:
                     print(f"New IG target [{ig_user}]: {shortcode}")
                     
-                    # EXTRACT THE DIRECT CDN LINK
+                    # EXTRACT DIRECT CDN LINK - DO NOT USE YT-DLP
                     cdn_url = media.get('video_url') or node.get('video_url')
                     
                     if not cdn_url:
-                        print(f"DEBUG [{ig_user}]: Missing CDN link. Keys inside media are: {list(media.keys())}")
-                        save_history(video_id) # Skip it so we don't get stuck
+                        print(f"DEBUG [{ig_user}]: Missing CDN link. Keys are: {list(media.keys())}")
+                        save_history(video_id) 
+                        history.add(video_id)
                         continue
                         
-                    print(f"Bypassing Meta block. Downloading directly from CDN...")
                     filepath = f"{video_id}.mp4"
                     downloaded_file = download_direct(cdn_url, filepath)
                     
@@ -149,7 +162,7 @@ async def sweep_instagram(history):
                             parse_mode='md'
                         )
                         os.remove(downloaded_file)
-                        print(f"Payload delivered: {shortcode}")
+                        print(f"IG Payload delivered: {shortcode}")
                         
                     save_history(video_id)
                     history.add(video_id)
