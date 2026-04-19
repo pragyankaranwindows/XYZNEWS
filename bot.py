@@ -141,15 +141,16 @@ async def sweep_instagram(history):
                 
                 node = item.get('node', item)
                 
-                # We check multiple common identifiers
-                shortcode = node.get('shortcode') or node.get('code') or node.get('id') or node.get('media_id')
+                # DRILL DOWN: The logs showed the data is inside 'media'
+                media = node.get('media', node)
+                
+                # Check for the shortcode in the media dictionary
+                shortcode = media.get('code') or media.get('shortcode') or node.get('code') or node.get('shortcode')
                 
                 if not shortcode:
-                    # DIAGNOSTIC TRIGGER: If we still can't find it, print exactly what is inside the node
-                    print(f"DEBUG [{ig_user}]: Missing shortcode identifier. Available keys in this reel are: {list(node.keys())}")
+                    print(f"DEBUG [{ig_user}]: Keys inside media are: {list(media.keys())}")
                     continue
 
-                # Clean up ID if it has extra tracking tags
                 if '_' in str(shortcode):
                     shortcode = str(shortcode).split('_')[0]
 
