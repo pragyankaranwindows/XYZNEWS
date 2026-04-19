@@ -40,7 +40,6 @@ def save_history(video_id):
         f.write(f"{video_id}\n")
 
 def download_video(video_url):
-    """Universal downloader for YT and IG payloads."""
     ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': '%(id)s.%(ext)s',
@@ -67,7 +66,6 @@ def download_video(video_url):
             return None, None
 
 async def sweep_youtube(history):
-    """Executes YouTube Radar Sweep."""
     for channel_id in YT_CHANNEL_IDS:
         try:
             rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
@@ -97,7 +95,6 @@ async def sweep_youtube(history):
             print(f"YT Sweep Error on {channel_id}: {e}")
 
 async def sweep_instagram(history):
-    """Executes Proxy-Routed Instagram Sweep."""
     if not RAPIDAPI_KEY:
         print("Skipping IG Sweep: RAPIDAPI_KEY not set.")
         return
@@ -125,8 +122,7 @@ async def sweep_instagram(history):
                 
             data = response.json()
             
-            # --- THE FIX: Updated dynamic parser based on your log intel ---
-            items = data.get('reels', []) # Prioritize 'reels' array
+            items = data.get('reels', [])
             if not items and 'data' in data:
                 items = data['data']
             elif not items and 'items' in data:
@@ -135,7 +131,7 @@ async def sweep_instagram(history):
                 items = data
                 
             if not items:
-                print(f"No reels found or unknown JSON structure for {ig_user}. Raw keys: {list(data.keys())}")
+                print(f"No reels found for {ig_user}. Raw keys: {list(data.keys())}")
                 continue
 
             count = 0
@@ -144,10 +140,18 @@ async def sweep_instagram(history):
                     break
                 
                 node = item.get('node', item)
-                shortcode = node.get('shortcode') or node.get('code')
+                
+                # We check multiple common identifiers
+                shortcode = node.get('shortcode') or node.get('code') or node.get('id') or node.get('media_id')
                 
                 if not shortcode:
+                    # DIAGNOSTIC TRIGGER: If we still can't find it, print exactly what is inside the node
+                    print(f"DEBUG [{ig_user}]: Missing shortcode identifier. Available keys in this reel are: {list(node.keys())}")
                     continue
+
+                # Clean up ID if it has extra tracking tags
+                if '_' in str(shortcode):
+                    shortcode = str(shortcode).split('_')[0]
 
                 video_id = f"ig_{shortcode}"
                 
