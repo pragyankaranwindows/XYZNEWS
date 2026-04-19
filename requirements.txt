@@ -2,3 +2,4 @@ telethon
 yt-dlp
 feedparser
 requests
+instaloader
