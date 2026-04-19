@@ -1,8 +1,8 @@
 import os
 import asyncio
 import feedparser
+import requests
 import yt_dlp
-import instaloader
 from telethon.sync import TelegramClient
 from telethon.sessions import StringSession
 
@@ -11,6 +11,9 @@ API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "") 
 SESSION_STRING = os.environ.get("SESSION_STRING", "") 
 TARGET_CHAT = int(os.environ.get("TARGET_CHAT", 0))
+
+# Proxy Integration
+RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "")
 
 # Target Arrays
 YT_CHANNELS_ENV = os.environ.get("YT_CHANNEL_IDS", "")
@@ -25,7 +28,6 @@ CHECK_INTERVAL = 300  # 5 minutes
 
 # Initialize Systems
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
-ig_radar = instaloader.Instaloader(quiet=True, download_video_thumbnails=False, save_metadata=False)
 
 def load_history():
     if not os.path.exists(HISTORY_FILE):
@@ -52,7 +54,6 @@ def download_video(video_url):
             duration = info.get('duration', 0)
             title = info.get('title', 'Video Payload')
             
-            # Duration limit only for YT. IG Reels are natively short.
             if 'youtube' in video_url and duration > 65:
                 print(f"Skipped: '{title}' is {duration}s long (Not a Short).")
                 return None, None
@@ -96,41 +97,79 @@ async def sweep_youtube(history):
             print(f"YT Sweep Error on {channel_id}: {e}")
 
 async def sweep_instagram(history):
-    """Executes Instagram Radar Sweep."""
+    """Executes Proxy-Routed Instagram Sweep."""
+    if not RAPIDAPI_KEY:
+        print("Skipping IG Sweep: RAPIDAPI_KEY environment variable not set.")
+        return
+
+    url = "https://instagram-scraper-stable-api.p.rapidapi.com/get_ig_user_reels.php"
+    headers = {
+        "content-type": "application/x-www-form-urlencoded",
+        "x-rapidapi-host": "instagram-scraper-stable-api.p.rapidapi.com",
+        "x-rapidapi-key": RAPIDAPI_KEY
+    }
+
     for ig_user in IG_USERNAMES:
         try:
-            profile = instaloader.Profile.from_username(ig_radar.context, ig_user)
-            post_iterator = profile.get_posts()
+            payload = {
+                "username_or_url": ig_user,
+                "amount": "3",  # We only need the latest 3 to check for new targets
+                "pagination_token": ""
+            }
             
-            # Scan only the 3 most recent posts to avoid triggering IG anti-bot defenses
-            for i in range(3):
-                try:
-                    post = next(post_iterator)
-                except StopIteration:
+            response = requests.post(url, data=payload, headers=headers)
+            
+            if response.status_code != 200:
+                print(f"Proxy Error [{response.status_code}] for {ig_user}. Check API quotas.")
+                continue
+                
+            data = response.json()
+            
+            # Dynamic parsing to locate the payload array
+            items = data.get('data', [])
+            if not items and 'items' in data:
+                items = data['items']
+            elif not items and isinstance(data, list):
+                items = data
+                
+            if not items:
+                print(f"No reels found or unknown JSON structure for {ig_user}. Raw keys: {list(data.keys())}")
+                continue
+
+            count = 0
+            for item in items:
+                if count >= 3:
                     break
                 
-                if post.is_video:
-                    # Prefix IG ids so they don't collide with YT ids
-                    video_id = f"ig_{post.shortcode}"
+                # Dig for the shortcode/code depending on API structure
+                node = item.get('node', item)
+                shortcode = node.get('shortcode') or node.get('code')
+                
+                if not shortcode:
+                    continue
+
+                video_id = f"ig_{shortcode}"
+                
+                if video_id not in history:
+                    reel_url = f"https://www.instagram.com/reel/{shortcode}/"
+                    print(f"New IG target [{ig_user}]: {shortcode}")
                     
-                    if video_id not in history:
-                        url = f"https://www.instagram.com/reel/{post.shortcode}/"
-                        print(f"New IG target [{ig_user}]: {post.shortcode}")
-                        
-                        filepath, vid_title = download_video(url)
-                        
-                        if filepath and os.path.exists(filepath):
-                            await client.send_file(
-                                TARGET_CHAT, filepath,
-                                caption=f"**Instagram Reel: @{ig_user}**\n\n[Instagram Source]({url})",
-                                parse_mode='md'
-                            )
-                            os.remove(filepath)
-                        save_history(video_id)
-                        history.add(video_id)
+                    filepath, vid_title = download_video(reel_url)
+                    
+                    if filepath and os.path.exists(filepath):
+                        await client.send_file(
+                            TARGET_CHAT, filepath,
+                            caption=f"**Instagram Reel: @{ig_user}**\n\n[Instagram Source]({reel_url})",
+                            parse_mode='md'
+                        )
+                        os.remove(filepath)
+                    save_history(video_id)
+                    history.add(video_id)
+                
+                count += 1
+                
         except Exception as e:
-            # IG will likely throw 429 errors (Too Many Requests). We catch it so YT keeps working.
-            print(f"IG Sweep Error on {ig_user}: {e}")
+            print(f"IG Proxy Routine Error on {ig_user}: {e}")
 
 async def main():
     if not SESSION_STRING or not API_ID or not API_HASH:
